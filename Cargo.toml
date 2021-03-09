@@ -1,0 +1,19 @@
+[package]
+name = "smorth"
+version = "0.1.0"
+authors = ["Yusuf Bera Ertan <y.bera003.06@protonmail.com>"]
+edition = "2018"
+
+[dependencies]
+tinystr = { version = "0.4.3", default-features = false, features = ["alloc"] }
+no-std-compat = { version = "0.4.1", features = ["alloc"] }
+hashbrown = { version = "0.9.1", default-features = false, features = ["ahash", "inline-more"] }
+rustyline = { version = "8.0.0", default-features = false, optional = true }
+
+[[bin]]
+name = "smorth"
+required-features = ["rustyline"]
+
+[features]
+default = [ "std" ] # Default to using the std
+std = [ "no-std-compat/std" ]

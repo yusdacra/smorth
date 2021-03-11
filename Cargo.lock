@@ -144,39 +144,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
 
 [[package]]
+name = "smartstring"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ada87540bf8ef4cf8a1789deb175626829bb59b1fefd816cf7f7f55efcdbae9"
+dependencies = [
+ "static_assertions",
+]
+
+[[package]]
 name = "smorth"
 version = "0.1.0"
 dependencies = [
  "hashbrown",
  "no-std-compat",
  "rustyline",
- "tinystr",
+ "smartstring",
 ]
 
 [[package]]
-name = "tinystr"
-version = "0.4.3"
+name = "static_assertions"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27aaed4540fcc2440c36fe3a98ca56450ee3da6d166da64369f40dc980aba459"
-dependencies = [
- "tinystr-macros",
- "tinystr-raw",
-]
-
-[[package]]
-name = "tinystr-macros"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f65be51117c325c2b58eec529be7a0857d11527a9029973b58810a4c63e77a6"
-dependencies = [
- "tinystr-raw",
-]
-
-[[package]]
-name = "tinystr-raw"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b975dd2af5824896acaeebf7336471fcafebfa417da0a290ded5509f297ccedb"
+checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "unicode-segmentation"

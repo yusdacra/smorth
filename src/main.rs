@@ -1,12 +1,16 @@
+use smorth::ProcessResult;
+
 const HIST_FILE: &str = "/tmp/.smorth_history";
 
 fn main() {
-    let mut state = Default::default();
-    let mut output = String::default();
+    let mut state = smorth::State::default();
     match std::env::args().nth(1) {
         Some(path) => {
             let code = std::fs::read_to_string(path).expect("couldnt read file");
-            if let Some(code) = run_words(&mut output, tokenize(&code).as_slice(), &mut state) {
+            let mut words = tokenize(&code);
+            if let ProcessResult::Code(code) =
+                smorth::do_word(&mut words, &mut state, &mut std::io::stdout())
+            {
                 std::process::exit(code);
             }
         }
@@ -17,7 +21,10 @@ fn main() {
             }
             while let Ok(line) = rl.readline(&construct_prefix(state.stack.as_slice())) {
                 rl.add_history_entry(line.as_str());
-                if let Some(code) = run_words(&mut output, tokenize(&line).as_slice(), &mut state) {
+                let mut words = tokenize(&line);
+                if let ProcessResult::Code(code) =
+                    smorth::do_word(&mut words, &mut state, &mut std::io::stdout())
+                {
                     rl.save_history(HIST_FILE).unwrap();
                     std::process::exit(code);
                 }
@@ -37,30 +44,16 @@ fn construct_prefix(stack: &[i64]) -> String {
     prefix
 }
 
-fn run_words(output: &mut String, words: &[&str], state: &mut smorth::State) -> Option<i32> {
-    for (index, word) in words.iter().enumerate() {
-        let data = smorth::Data { words, word, index };
-        let exit_code = smorth::do_word(data, state, output);
-        if exit_code.is_some() {
-            return exit_code;
-        }
-        if !output.is_empty() {
-            print!("{}", output);
-        }
-        output.clear();
-    }
-    None
-}
-
-fn tokenize(code: &str) -> Vec<&str> {
+fn tokenize(code: &str) -> Vec<smorth::Word> {
     code.split(|c| c == ' ' || c == '\n')
         .filter_map(|s| {
             let new = s.trim();
             if new.is_empty() {
                 None
             } else {
-                Some(new)
+                Some(new.into())
             }
         })
+        .rev()
         .collect::<Vec<_>>()
 }

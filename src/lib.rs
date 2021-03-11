@@ -3,138 +3,120 @@
 extern crate no_std_compat as std;
 
 use hashbrown::HashMap;
-use std::{fmt::Write, prelude::v1::*};
-use tinystr::TinyStrAuto;
-
-#[derive(Debug, Clone, Copy)]
-enum Action {
-    Defining(usize),
-    Saying,
-    None,
-}
-
-impl Default for Action {
-    fn default() -> Self {
-        Action::None
-    }
-}
+use smartstring::{Compact, SmartString};
+use std::prelude::v1::*;
 
 type Stack = Vec<i64>;
-type Word = TinyStrAuto;
+pub type Word = SmartString<Compact>;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Copy)]
+pub enum ProcessResult {
+    Ok,
+    Code(i32),
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct State {
     pub stack: Stack,
-    dict: HashMap<Word, Vec<Word>>,
-    act: Action,
+    pub dict: HashMap<Word, Vec<Word>>,
 }
 
-pub struct Data<'a> {
-    pub words: &'a [&'a str],
-    pub word: &'a str,
-    pub index: usize,
-}
-
-pub fn do_word<'a>(data: Data<'a>, state: &mut State, out_buf: &mut String) -> Option<i32> {
-    let stack = &mut state.stack;
-    match state.act {
-        Action::Saying => {
-            if data.word != "\"" {
-                out_buf.push_str(data.word);
-                out_buf.push(' ');
+pub fn do_word(
+    words: &mut Vec<Word>,
+    state: &mut State,
+    out_buf: &mut dyn std::io::Write,
+) -> ProcessResult {
+    let word = match words.pop() {
+        Some(w) => w,
+        None => return ProcessResult::Ok,
+    };
+    match word.as_str() {
+        "." => write!(out_buf, "{} ", su(state.stack.pop())).unwrap(),
+        "emit" => write!(
+            out_buf,
+            "{}",
+            std::char::from_u32(su(state.stack.pop()) as u32)
+                .unwrap_or(std::char::REPLACEMENT_CHARACTER)
+        )
+        .unwrap(),
+        "cr" => writeln!(out_buf).unwrap(),
+        "+" => do_op(&mut state.stack, |f, s| s + f),
+        "-" => do_op(&mut state.stack, |f, s| s - f),
+        "*" => do_op(&mut state.stack, |f, s| s * f),
+        "/" => do_op(&mut state.stack, |f, s| s / f),
+        "<" => do_op(&mut state.stack, |f, s| if s < f { -1 } else { 0 }),
+        ">" => do_op(&mut state.stack, |f, s| if s > f { -1 } else { 0 }),
+        "=" => do_op(&mut state.stack, |f, s| if f == s { -1 } else { 0 }),
+        "and" => do_op(&mut state.stack, |f, s| s & f),
+        "or" => do_op(&mut state.stack, |f, s| s | f),
+        "invert" => {
+            let val = !su(state.stack.pop());
+            state.stack.push(val);
+        }
+        "dup" => state.stack.push(*su(state.stack.last())),
+        "drop" => {
+            su(state.stack.pop());
+        }
+        "swap" => {
+            if state.stack.len() > 1 {
+                let mut v = state.stack.split_off(state.stack.len() - 2);
+                v.reverse();
+                state.stack.append(&mut v)
             } else {
-                state.act = Action::None;
+                panic!("stack underflow")
             }
         }
-        Action::Defining(def_index) => {
-            let def_word: Word = data
-                .words
-                .get(def_index + 1)
-                .expect("no def word name")
-                .parse()
-                .expect("should not happen");
-            if data.index != def_index + 1 {
-                if data.word == ";" {
-                    state.act = Action::None;
-                } else {
-                    state
-                        .dict
-                        .get_mut(&def_word)
-                        .expect("cant happen")
-                        .push(data.word.parse().expect("should not happen"));
-                }
-            } else {
-                state.dict.insert(def_word, vec![]);
-            }
+        "over" => state
+            .stack
+            .push(*su(state.stack.get(state.stack.len() - 2))),
+        "rot" => {
+            state
+                .stack
+                .push(*su(state.stack.get(state.stack.len() - 3)));
+            state.stack.remove(state.stack.len() - 4);
         }
-        Action::None => match data.word {
-            "." => write!(out_buf, "{} ", su(stack.pop()))
-                .unwrap_or_else(|_| out_buf.push(std::char::REPLACEMENT_CHARACTER)),
-            "emit" => out_buf.push(
-                std::char::from_u32(su(stack.pop()) as u32)
-                    .unwrap_or(std::char::REPLACEMENT_CHARACTER),
-            ),
-            "cr" => out_buf.push('\n'),
-            "+" => do_op(stack, |f, s| s + f),
-            "-" => do_op(stack, |f, s| s - f),
-            "*" => do_op(stack, |f, s| s * f),
-            "/" => do_op(stack, |f, s| s / f),
-            "<" => do_op(stack, |f, s| if s < f { -1 } else { 0 }),
-            ">" => do_op(stack, |f, s| if s > f { -1 } else { 0 }),
-            "=" => do_op(stack, |f, s| if f == s { -1 } else { 0 }),
-            "and" => do_op(stack, |f, s| s & f),
-            "or" => do_op(stack, |f, s| s | f),
-            "invert" => {
-                let val = !su(stack.pop());
-                stack.push(val);
-            }
-            "dup" => stack.push(*su(stack.last())),
-            "drop" => {
-                su(stack.pop());
-            }
-            "swap" => {
-                if stack.len() > 1 {
-                    let mut v = stack.split_off(stack.len() - 2);
-                    v.reverse();
-                    stack.append(&mut v)
-                } else {
-                    panic!("stack underflow")
+        "exit" => return ProcessResult::Code(su(state.stack.pop()) as i32),
+        ":" => {
+            let def_word = su(words.pop());
+            state.dict.insert(def_word.clone(), vec![]);
+            define_word(words, state, def_word.as_str());
+        }
+        ".\"" => say_smth(words, state, out_buf),
+        _ => match word.as_str().parse::<i64>() {
+            Ok(num) => state.stack.push(num),
+            Err(_) => {
+                let mut instructions = state.dict.get(&word).expect("no such word").clone();
+                instructions.reverse();
+                let exit_code = do_word(&mut instructions, state, out_buf);
+                if matches!(exit_code, ProcessResult::Code(_)) {
+                    return exit_code;
                 }
             }
-            "over" => stack.push(*su(stack.get(stack.len() - 2))),
-            "rot" => {
-                stack.push(*su(stack.get(stack.len() - 3)));
-                stack.remove(stack.len() - 4);
-            }
-            "exit" => return Some(su(stack.pop()) as i32),
-            ":" => state.act = Action::Defining(data.index),
-            ".\"" => state.act = Action::Saying,
-            _ => match data.word.parse::<i64>() {
-                Ok(num) => stack.push(num),
-                Err(_) => {
-                    for w in state
-                        .dict
-                        .iter()
-                        .find_map(|(k, v)| {
-                            if data.word.as_bytes() == k.as_bytes() {
-                                Some(v)
-                            } else {
-                                None
-                            }
-                        })
-                        .expect("no such word")
-                        .clone()
-                    {
-                        let maybe_exit_code = do_word(Data { word: &w, ..data }, state, out_buf);
-                        if maybe_exit_code.is_some() {
-                            return maybe_exit_code;
-                        }
-                    }
-                }
-            },
         },
     }
-    None
+    do_word(words, state, out_buf)
+}
+
+fn say_smth(words: &mut Vec<Word>, state: &mut State, out_buf: &mut dyn std::io::Write) {
+    let word = su(words.pop());
+    if word != "\"" {
+        write!(out_buf, "{} ", word).unwrap();
+        say_smth(words, state, out_buf);
+    }
+}
+
+fn define_word(words: &mut Vec<Word>, state: &mut State, def_word: &str) {
+    let word = su(words.pop());
+    if word == ";" {
+        return;
+    } else {
+        state
+            .dict
+            .get_mut(def_word)
+            .expect("cant happen")
+            .push(word);
+    }
+    define_word(words, state, def_word);
 }
 
 fn do_op(stack: &mut Stack, op: fn(i64, i64) -> i64) {

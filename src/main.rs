@@ -8,7 +8,12 @@ fn main() {
         Some(path) => {
             let code = std::fs::read_to_string(path).expect("couldnt read file");
             let mut words = tokenize(&code);
-            match smorth::do_word(&mut words, &mut state, &mut std::io::stdout()) {
+            match smorth::do_word(
+                &mut words,
+                &mut state,
+                &mut std::io::stdout(),
+                &mut std::io::stdin(),
+            ) {
                 Err(ExecutionError::Code(code)) => std::process::exit(code),
                 Err(err) => eprintln!("{}", err),
                 _ => {}
@@ -22,7 +27,12 @@ fn main() {
             while let Ok(line) = rl.readline(&construct_prefix(state.stack.as_slice())) {
                 rl.add_history_entry(line.as_str());
                 let mut words = tokenize(&line);
-                match smorth::do_word(&mut words, &mut state, &mut std::io::stdout()) {
+                match smorth::do_word(
+                    &mut words,
+                    &mut state,
+                    &mut std::io::stdout(),
+                    &mut std::io::stdin(),
+                ) {
                     Err(ExecutionError::Code(code)) => {
                         rl.save_history(HIST_FILE).unwrap();
                         std::process::exit(code);

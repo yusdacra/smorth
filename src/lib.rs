@@ -4,8 +4,11 @@ extern crate no_std_compat as std;
 
 use hashbrown::HashMap;
 use smartstring::{Compact, SmartString};
-use std::fmt::{self, Display, Formatter};
-use std::prelude::v1::*;
+use std::{
+    fmt::{self, Display, Formatter},
+    io::Read,
+    prelude::v1::*,
+};
 
 type Stack = Vec<i64>;
 pub type Word = SmartString<Compact>;
@@ -13,11 +16,12 @@ pub type Word = SmartString<Compact>;
 pub const FALSE: i64 = 0;
 pub const TRUE: i64 = -1;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ExecutionError {
     Code(i32),
     StackUnderflow,
     NoSuchWord(Word),
+    IoError(std::io::Error),
 }
 
 impl Display for ExecutionError {
@@ -26,7 +30,14 @@ impl Display for ExecutionError {
             ExecutionError::Code(code) => write!(f, "exited with code {}", code),
             ExecutionError::StackUnderflow => write!(f, "stack underflow"),
             ExecutionError::NoSuchWord(word) => write!(f, "no such word ({})", word),
+            ExecutionError::IoError(err) => write!(f, "io error occured: {}", err),
         }
+    }
+}
+
+impl From<std::io::Error> for ExecutionError {
+    fn from(err: std::io::Error) -> Self {
+        ExecutionError::IoError(err)
     }
 }
 
@@ -36,27 +47,36 @@ type ExecutionResult<T> = Result<T, ExecutionError>;
 pub struct State {
     pub stack: Stack,
     pub dict: HashMap<Word, Vec<Word>>,
+    read_buf: String,
+    temp_inst_buf: Vec<Word>,
 }
 
-pub fn do_word(
+pub fn do_word<R: Read>(
     words: &mut Vec<Word>,
     state: &mut State,
     out_buf: &mut dyn std::io::Write,
+    in_buf: &mut R,
 ) -> ExecutionResult<()> {
     let word = match words.pop() {
         Some(w) => w,
         None => return Ok(()),
     };
     match word.as_str() {
-        "." => write!(out_buf, "{} ", su(state.stack.pop())?).unwrap(),
+        "." => write!(out_buf, "{} ", su(state.stack.pop())?)?,
         "emit" => write!(
             out_buf,
             "{}",
             std::char::from_u32(su(state.stack.pop())? as u32)
                 .unwrap_or(std::char::REPLACEMENT_CHARACTER)
-        )
-        .unwrap(),
-        "cr" => writeln!(out_buf).unwrap(),
+        )?,
+        "read" => {
+            in_buf.read_to_string(&mut state.read_buf)?;
+            for c in state.read_buf.chars() {
+                state.stack.push(c as i64);
+            }
+            state.read_buf.clear();
+        }
+        "cr" => writeln!(out_buf)?,
         "+" => do_op(&mut state.stack, |f, s| s + f)?,
         "-" => do_op(&mut state.stack, |f, s| s - f)?,
         "*" => do_op(&mut state.stack, |f, s| s * f)?,
@@ -112,17 +132,17 @@ pub fn do_word(
         ".\"" => loop {
             let word = su(words.pop())?;
             if word != "\"" {
-                write!(out_buf, "{} ", word).unwrap();
+                write!(out_buf, "{} ", word)?;
             } else {
                 break;
             }
         },
         "if" => {
             if su(state.stack.pop())? == TRUE {
+                state.temp_inst_buf.append(words);
                 let has_else;
-                let mut instructions = Vec::with_capacity(5);
                 loop {
-                    let word = su(words.pop())?;
+                    let word = su(state.temp_inst_buf.pop())?;
                     if word == "then" {
                         has_else = false;
                         break;
@@ -130,23 +150,25 @@ pub fn do_word(
                         has_else = true;
                         break;
                     } else {
-                        instructions.push(word);
+                        words.push(word);
                     }
                 }
                 if has_else {
                     loop {
-                        let word = su(words.pop())?;
+                        let word = su(state.temp_inst_buf.pop())?;
                         if word == "then" {
                             break;
                         }
                     }
                 }
-                instructions.reverse();
-                do_word(&mut instructions, state, out_buf)?;
+                words.reverse();
+                do_word(words, state, out_buf, in_buf)?;
+                words.append(&mut state.temp_inst_buf);
             } else {
+                state.temp_inst_buf.append(words);
                 let has_else;
                 loop {
-                    let word = su(words.pop())?;
+                    let word = su(state.temp_inst_buf.pop())?;
                     if word == "then" {
                         has_else = false;
                         break;
@@ -156,17 +178,17 @@ pub fn do_word(
                     }
                 }
                 if has_else {
-                    let mut instructions = Vec::with_capacity(5);
                     loop {
-                        let word = su(words.pop())?;
+                        let word = su(state.temp_inst_buf.pop())?;
                         if word == "then" {
                             break;
                         } else {
-                            instructions.push(word);
+                            words.push(word);
                         }
                     }
-                    instructions.reverse();
-                    do_word(&mut instructions, state, out_buf)?;
+                    words.reverse();
+                    do_word(words, state, out_buf, in_buf)?;
+                    words.append(&mut state.temp_inst_buf);
                 }
             }
         }
@@ -179,11 +201,11 @@ pub fn do_word(
                     .ok_or(ExecutionError::NoSuchWord(word))?
                     .clone();
                 instructions.reverse();
-                do_word(&mut instructions, state, out_buf)?;
+                do_word(&mut instructions, state, out_buf, in_buf)?;
             }
         },
     }
-    do_word(words, state, out_buf)
+    do_word(words, state, out_buf, in_buf)
 }
 
 fn do_op(stack: &mut Stack, op: fn(i64, i64) -> i64) -> ExecutionResult<()> {

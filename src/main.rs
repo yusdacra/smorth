@@ -1,4 +1,4 @@
-use smorth::ProcessResult;
+use smorth::ExecutionError;
 
 const HIST_FILE: &str = "/tmp/.smorth_history";
 
@@ -8,10 +8,10 @@ fn main() {
         Some(path) => {
             let code = std::fs::read_to_string(path).expect("couldnt read file");
             let mut words = tokenize(&code);
-            if let ProcessResult::Code(code) =
-                smorth::do_word(&mut words, &mut state, &mut std::io::stdout())
-            {
-                std::process::exit(code);
+            match smorth::do_word(&mut words, &mut state, &mut std::io::stdout()) {
+                Err(ExecutionError::Code(code)) => std::process::exit(code),
+                Err(err) => eprintln!("{}", err),
+                _ => {}
             }
         }
         None => {
@@ -22,11 +22,13 @@ fn main() {
             while let Ok(line) = rl.readline(&construct_prefix(state.stack.as_slice())) {
                 rl.add_history_entry(line.as_str());
                 let mut words = tokenize(&line);
-                if let ProcessResult::Code(code) =
-                    smorth::do_word(&mut words, &mut state, &mut std::io::stdout())
-                {
-                    rl.save_history(HIST_FILE).unwrap();
-                    std::process::exit(code);
+                match smorth::do_word(&mut words, &mut state, &mut std::io::stdout()) {
+                    Err(ExecutionError::Code(code)) => {
+                        rl.save_history(HIST_FILE).unwrap();
+                        std::process::exit(code);
+                    }
+                    Err(err) => eprintln!("{}", err),
+                    _ => {}
                 }
             }
             rl.save_history(HIST_FILE).unwrap();

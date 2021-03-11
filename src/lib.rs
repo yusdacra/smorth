@@ -104,40 +104,60 @@ pub fn do_word(
             }
         },
         "if" => {
-            let mdo = su(state.stack.pop());
-            let mut has_else = false;
-            let mut instructions = Vec::with_capacity(1);
-            while let Some(word) = words.pop() {
-                if word == "then" {
-                    break;
-                } else if word == "else" {
-                    has_else = true;
-                    break;
-                } else {
-                    instructions.push(word);
-                }
-            }
-            let mut maybe_else_instructions = Vec::with_capacity(1);
-            if has_else {
-                while let Some(word) = words.pop() {
+            if su(state.stack.pop()) == TRUE {
+                let has_else;
+                let mut instructions = Vec::with_capacity(5);
+                loop {
+                    let word = su(words.pop());
                     if word == "then" {
+                        has_else = false;
+                        break;
+                    } else if word == "else" {
+                        has_else = true;
                         break;
                     } else {
-                        maybe_else_instructions.push(word);
+                        instructions.push(word);
                     }
                 }
-            }
-            let mut ws = if mdo == TRUE {
+                if has_else {
+                    loop {
+                        let word = su(words.pop());
+                        if word == "then" {
+                            break;
+                        }
+                    }
+                }
                 instructions.reverse();
-                instructions
-            } else if has_else {
-                maybe_else_instructions.reverse();
-                maybe_else_instructions
+                if let ProcessResult::Code(code) = do_word(&mut instructions, state, out_buf) {
+                    return ProcessResult::Code(code);
+                }
             } else {
-                panic!("branched to else, but no else found");
-            };
-            if let ProcessResult::Code(code) = do_word(&mut ws, state, out_buf) {
-                return ProcessResult::Code(code);
+                let has_else;
+                loop {
+                    let word = su(words.pop());
+                    if word == "then" {
+                        has_else = false;
+                        break;
+                    } else if word == "else" {
+                        has_else = true;
+                        break;
+                    }
+                }
+                if has_else {
+                    let mut instructions = Vec::with_capacity(5);
+                    loop {
+                        let word = su(words.pop());
+                        if word == "then" {
+                            break;
+                        } else {
+                            instructions.push(word);
+                        }
+                    }
+                    instructions.reverse();
+                    if let ProcessResult::Code(code) = do_word(&mut instructions, state, out_buf) {
+                        return ProcessResult::Code(code);
+                    }
+                }
             }
         }
         _ => match word.as_str().parse::<i64>() {
@@ -145,9 +165,8 @@ pub fn do_word(
             Err(_) => {
                 let mut instructions = state.dict.get(&word).expect("no such word").clone();
                 instructions.reverse();
-                let exit_code = do_word(&mut instructions, state, out_buf);
-                if matches!(exit_code, ProcessResult::Code(_)) {
-                    return exit_code;
+                if let ProcessResult::Code(code) = do_word(&mut instructions, state, out_buf) {
+                    return ProcessResult::Code(code);
                 }
             }
         },

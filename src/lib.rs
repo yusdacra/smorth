@@ -9,6 +9,9 @@ use std::prelude::v1::*;
 type Stack = Vec<i64>;
 pub type Word = SmartString<Compact>;
 
+pub const FALSE: i64 = 0;
+pub const TRUE: i64 = -1;
+
 #[derive(Debug, Clone, Copy)]
 pub enum ProcessResult {
     Ok,
@@ -44,9 +47,9 @@ pub fn do_word(
         "-" => do_op(&mut state.stack, |f, s| s - f),
         "*" => do_op(&mut state.stack, |f, s| s * f),
         "/" => do_op(&mut state.stack, |f, s| s / f),
-        "<" => do_op(&mut state.stack, |f, s| if s < f { -1 } else { 0 }),
-        ">" => do_op(&mut state.stack, |f, s| if s > f { -1 } else { 0 }),
-        "=" => do_op(&mut state.stack, |f, s| if f == s { -1 } else { 0 }),
+        "<" => do_op(&mut state.stack, |f, s| if s < f { TRUE } else { FALSE }),
+        ">" => do_op(&mut state.stack, |f, s| if s > f { TRUE } else { FALSE }),
+        "=" => do_op(&mut state.stack, |f, s| if f == s { TRUE } else { FALSE }),
         "and" => do_op(&mut state.stack, |f, s| s & f),
         "or" => do_op(&mut state.stack, |f, s| s | f),
         "invert" => {
@@ -79,9 +82,64 @@ pub fn do_word(
         ":" => {
             let def_word = su(words.pop());
             state.dict.insert(def_word.clone(), vec![]);
-            define_word(words, state, def_word.as_str());
+            loop {
+                let word = su(words.pop());
+                if word == ";" {
+                    break;
+                } else {
+                    state
+                        .dict
+                        .get_mut(&def_word)
+                        .expect("cant happen")
+                        .push(word);
+                }
+            }
         }
-        ".\"" => say_smth(words, state, out_buf),
+        ".\"" => loop {
+            let word = su(words.pop());
+            if word != "\"" {
+                write!(out_buf, "{} ", word).unwrap();
+            } else {
+                break;
+            }
+        },
+        "if" => {
+            let mdo = su(state.stack.pop());
+            let mut has_else = false;
+            let mut instructions = Vec::with_capacity(1);
+            while let Some(word) = words.pop() {
+                if word == "then" {
+                    break;
+                } else if word == "else" {
+                    has_else = true;
+                    break;
+                } else {
+                    instructions.push(word);
+                }
+            }
+            let mut maybe_else_instructions = Vec::with_capacity(1);
+            if has_else {
+                while let Some(word) = words.pop() {
+                    if word == "then" {
+                        break;
+                    } else {
+                        maybe_else_instructions.push(word);
+                    }
+                }
+            }
+            let mut ws = if mdo == TRUE {
+                instructions.reverse();
+                instructions
+            } else if has_else {
+                maybe_else_instructions.reverse();
+                maybe_else_instructions
+            } else {
+                panic!("branched to else, but no else found");
+            };
+            if let ProcessResult::Code(code) = do_word(&mut ws, state, out_buf) {
+                return ProcessResult::Code(code);
+            }
+        }
         _ => match word.as_str().parse::<i64>() {
             Ok(num) => state.stack.push(num),
             Err(_) => {
@@ -95,28 +153,6 @@ pub fn do_word(
         },
     }
     do_word(words, state, out_buf)
-}
-
-fn say_smth(words: &mut Vec<Word>, state: &mut State, out_buf: &mut dyn std::io::Write) {
-    let word = su(words.pop());
-    if word != "\"" {
-        write!(out_buf, "{} ", word).unwrap();
-        say_smth(words, state, out_buf);
-    }
-}
-
-fn define_word(words: &mut Vec<Word>, state: &mut State, def_word: &str) {
-    let word = su(words.pop());
-    if word == ";" {
-        return;
-    } else {
-        state
-            .dict
-            .get_mut(def_word)
-            .expect("cant happen")
-            .push(word);
-    }
-    define_word(words, state, def_word);
 }
 
 fn do_op(stack: &mut Stack, op: fn(i64, i64) -> i64) {

@@ -6,6 +6,11 @@ edition = "2018"
 license = "MIT"
 
 [dependencies]
+tinyvec = { version = "1.1.1", features = [
+    "alloc",
+    "nightly_const_generics",
+    "nightly_slice_partition_dedup",
+] }
 smartstring = { version = "0.2.6" }
 no-std-compat = { version = "0.4.1", features = ["alloc"] }
 hashbrown = { version = "0.9.1", default-features = false, features = ["ahash", "inline-more"] }
@@ -16,5 +21,5 @@ name = "smorth"
 required-features = ["rustyline"]
 
 [features]
-default = [ "std" ] # Default to using the std
-std = [ "no-std-compat/std" ]
+default = ["std"] # Default to using the std
+std = ["no-std-compat/std"]

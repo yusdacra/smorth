@@ -1,20 +1,21 @@
-use smorth::ExecutionError;
+use smorth::{tokenize, ExecutionError, State};
+
+use std::{
+    env, fs,
+    io::{stdin, stdout},
+    process::exit,
+};
 
 const HIST_FILE: &str = "/tmp/.smorth_history";
 
 fn main() {
-    let mut state = smorth::State::default();
-    match std::env::args().nth(1) {
+    let mut state = State::<128>::default();
+    match env::args().nth(1) {
         Some(path) => {
-            let code = std::fs::read_to_string(path).expect("couldnt read file");
+            let code = fs::read_to_string(path).expect("couldnt read file");
             let mut words = tokenize(&code);
-            match smorth::do_word(
-                &mut words,
-                &mut state,
-                &mut std::io::stdout(),
-                &mut std::io::stdin(),
-            ) {
-                Err(ExecutionError::Code(code)) => std::process::exit(code),
+            match state.do_word(&mut words, &mut stdout(), &mut stdin()) {
+                Err(ExecutionError::Code(code)) => exit(code),
                 Err(err) => eprintln!("{}", err),
                 _ => {}
             }
@@ -27,15 +28,10 @@ fn main() {
             while let Ok(line) = rl.readline(&construct_prefix(state.stack.as_slice())) {
                 rl.add_history_entry(line.as_str());
                 let mut words = tokenize(&line);
-                match smorth::do_word(
-                    &mut words,
-                    &mut state,
-                    &mut std::io::stdout(),
-                    &mut std::io::stdin(),
-                ) {
+                match state.do_word(&mut words, &mut stdout(), &mut stdin()) {
                     Err(ExecutionError::Code(code)) => {
                         rl.save_history(HIST_FILE).unwrap();
-                        std::process::exit(code);
+                        exit(code);
                     }
                     Err(err) => eprintln!("{}", err),
                     _ => {}
@@ -54,18 +50,4 @@ fn construct_prefix(stack: &[i64]) -> String {
     }
     prefix.push_str("#> ");
     prefix
-}
-
-fn tokenize(code: &str) -> Vec<smorth::Word> {
-    code.split(|c| c == ' ' || c == '\n')
-        .filter_map(|s| {
-            let new = s.trim();
-            if new.is_empty() {
-                None
-            } else {
-                Some(new.into())
-            }
-        })
-        .rev()
-        .collect::<Vec<_>>()
 }

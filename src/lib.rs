@@ -6,11 +6,15 @@ use hashbrown::HashMap;
 use smartstring::{Compact, SmartString};
 use std::{
     fmt::{self, Display, Formatter},
-    io::Read,
+    io::{Read, Write},
     prelude::v1::*,
 };
+use tinyvec::{tiny_vec, TinyVec};
 
-type Stack = Vec<i64>;
+const STACK_SIZE: usize = 256;
+
+type Words<const N: usize> = TinyVec<[Word; N]>;
+type Stack = TinyVec<[i64; STACK_SIZE]>;
 pub type Word = SmartString<Compact>;
 
 pub const FALSE: i64 = 0;
@@ -43,169 +47,176 @@ impl From<std::io::Error> for ExecutionError {
 
 type ExecutionResult<T> = Result<T, ExecutionError>;
 
-#[derive(Debug, Clone, Default)]
-pub struct State {
+#[derive(Debug, Clone)]
+pub struct State<const N: usize> {
     pub stack: Stack,
-    pub dict: HashMap<Word, Vec<Word>>,
+    pub dict: HashMap<Word, Words<N>>,
     read_buf: String,
-    temp_inst_buf: Vec<Word>,
+    temp_inst_buf: Words<N>,
 }
 
-pub fn do_word<R: Read>(
-    words: &mut Vec<Word>,
-    state: &mut State,
-    out_buf: &mut dyn std::io::Write,
-    in_buf: &mut R,
-) -> ExecutionResult<()> {
-    let word = match words.pop() {
-        Some(w) => w,
-        None => return Ok(()),
-    };
-    match word.as_str() {
-        "." => write!(out_buf, "{} ", su(state.stack.pop())?)?,
-        "emit" => write!(
-            out_buf,
-            "{}",
-            std::char::from_u32(su(state.stack.pop())? as u32)
-                .unwrap_or(std::char::REPLACEMENT_CHARACTER)
-        )?,
-        "read" => {
-            in_buf.read_to_string(&mut state.read_buf)?;
-            for c in state.read_buf.chars() {
-                state.stack.push(c as i64);
+impl<const N: usize> Default for State<N> {
+    fn default() -> Self {
+        Self {
+            stack: tiny_vec!([i64; STACK_SIZE]),
+            dict: HashMap::with_capacity(16),
+            read_buf: String::with_capacity(128),
+            temp_inst_buf: tiny_vec!([Word; N]),
+        }
+    }
+}
+
+impl<const N: usize> State<N> {
+    pub fn do_word<R: Read, W: Write>(
+        &mut self,
+        words: &mut Words<N>,
+        out_buf: &mut W,
+        in_buf: &mut R,
+    ) -> ExecutionResult<()> {
+        let word = match words.pop() {
+            Some(w) => w,
+            None => return Ok(()),
+        };
+        match word.as_str() {
+            "." => write!(out_buf, "{} ", su(self.stack.pop())?)?,
+            "emit" => write!(
+                out_buf,
+                "{}",
+                std::char::from_u32(su(self.stack.pop())? as u32)
+                    .unwrap_or(std::char::REPLACEMENT_CHARACTER)
+            )?,
+            "read" => {
+                in_buf.read_to_string(&mut self.read_buf)?;
+                for c in self.read_buf.chars() {
+                    self.stack.push(c as i64);
+                }
+                self.read_buf.clear();
             }
-            state.read_buf.clear();
-        }
-        "cr" => writeln!(out_buf)?,
-        "+" => do_op(&mut state.stack, |f, s| s + f)?,
-        "-" => do_op(&mut state.stack, |f, s| s - f)?,
-        "*" => do_op(&mut state.stack, |f, s| s * f)?,
-        "/" => do_op(&mut state.stack, |f, s| s / f)?,
-        "<" => do_op(&mut state.stack, |f, s| if s < f { TRUE } else { FALSE })?,
-        ">" => do_op(&mut state.stack, |f, s| if s > f { TRUE } else { FALSE })?,
-        "=" => do_op(&mut state.stack, |f, s| if f == s { TRUE } else { FALSE })?,
-        "and" => do_op(&mut state.stack, |f, s| s & f)?,
-        "or" => do_op(&mut state.stack, |f, s| s | f)?,
-        "not" => {
-            let val = !su(state.stack.pop())?;
-            state.stack.push(val);
-        }
-        "dup" => state.stack.push(*su(state.stack.last())?),
-        "drop" => {
-            su(state.stack.pop())?;
-        }
-        "swap" => {
-            if state.stack.len() > 1 {
-                let mut v = state.stack.split_off(state.stack.len() - 2);
-                v.reverse();
-                state.stack.append(&mut v)
-            } else {
-                return Err(ExecutionError::StackUnderflow);
+            "cr" => writeln!(out_buf)?,
+            "+" => do_op(&mut self.stack, |f, s| s + f)?,
+            "-" => do_op(&mut self.stack, |f, s| s - f)?,
+            "*" => do_op(&mut self.stack, |f, s| s * f)?,
+            "/" => do_op(&mut self.stack, |f, s| s / f)?,
+            "<" => do_op(&mut self.stack, |f, s| if s < f { TRUE } else { FALSE })?,
+            ">" => do_op(&mut self.stack, |f, s| if s > f { TRUE } else { FALSE })?,
+            "=" => do_op(&mut self.stack, |f, s| if f == s { TRUE } else { FALSE })?,
+            "and" => do_op(&mut self.stack, |f, s| s & f)?,
+            "or" => do_op(&mut self.stack, |f, s| s | f)?,
+            "not" => {
+                let val = !su(self.stack.pop())?;
+                self.stack.push(val);
             }
-        }
-        "over" => state
-            .stack
-            .push(*su(state.stack.get(state.stack.len() - 2))?),
-        "rot" => {
-            state
-                .stack
-                .push(*su(state.stack.get(state.stack.len() - 3))?);
-            state.stack.remove(state.stack.len() - 4);
-        }
-        "exit" => return Err(ExecutionError::Code(su(state.stack.pop())? as i32)),
-        ":" => {
-            let def_word = su(words.pop())?;
-            state.dict.insert(def_word.clone(), vec![]);
-            loop {
-                let word = su(words.pop())?;
-                if word == ";" {
-                    break;
+            "dup" => self.stack.push(*su(self.stack.last())?),
+            "drop" => {
+                su(self.stack.pop())?;
+            }
+            "swap" => {
+                if self.stack.len() > 1 {
+                    let mut v = self.stack.split_off(self.stack.len() - 2);
+                    v.reverse();
+                    self.stack.append(&mut v)
                 } else {
-                    state
-                        .dict
-                        .get_mut(&def_word)
-                        .expect("cant happen")
-                        .push(word);
+                    return Err(ExecutionError::StackUnderflow);
                 }
             }
-        }
-        ".\"" => loop {
-            let word = su(words.pop())?;
-            if word != "\"" {
-                write!(out_buf, "{} ", word)?;
-            } else {
-                break;
+            "over" => self.stack.push(*su(self.stack.get(self.stack.len() - 2))?),
+            "rot" => {
+                self.stack.push(*su(self.stack.get(self.stack.len() - 3))?);
+                self.stack.remove(self.stack.len() - 4);
             }
-        },
-        "if" => {
-            if su(state.stack.pop())? == TRUE {
-                state.temp_inst_buf.append(words);
-                let has_else;
+            "exit" => return Err(ExecutionError::Code(su(self.stack.pop())? as i32)),
+            ":" => {
+                let def_word = su(words.pop())?;
+                self.dict
+                    .insert(def_word.clone(), tinyvec::tiny_vec!([Word; N]));
                 loop {
-                    let word = su(state.temp_inst_buf.pop())?;
-                    if word == "then" {
-                        has_else = false;
-                        break;
-                    } else if word == "else" {
-                        has_else = true;
+                    let word = su(words.pop())?;
+                    if word == ";" {
                         break;
                     } else {
-                        words.push(word);
+                        self.dict
+                            .get_mut(&def_word)
+                            .expect("cant happen")
+                            .push(word);
                     }
                 }
-                if has_else {
-                    loop {
-                        let word = su(state.temp_inst_buf.pop())?;
-                        if word == "then" {
-                            break;
-                        }
-                    }
+            }
+            ".\"" => loop {
+                let word = su(words.pop())?;
+                if word != "\"" {
+                    write!(out_buf, "{} ", word)?;
+                } else {
+                    break;
                 }
-                words.reverse();
-                do_word(words, state, out_buf, in_buf)?;
-                words.append(&mut state.temp_inst_buf);
-            } else {
-                state.temp_inst_buf.append(words);
+            },
+            "if" => {
                 let has_else;
-                loop {
-                    let word = su(state.temp_inst_buf.pop())?;
-                    if word == "then" {
-                        has_else = false;
-                        break;
-                    } else if word == "else" {
-                        has_else = true;
-                        break;
-                    }
-                }
-                if has_else {
+                self.temp_inst_buf.append(words);
+                if su(self.stack.pop())? == TRUE {
                     loop {
-                        let word = su(state.temp_inst_buf.pop())?;
+                        let word = su(self.temp_inst_buf.pop())?;
                         if word == "then" {
+                            has_else = false;
+                            break;
+                        } else if word == "else" {
+                            has_else = true;
                             break;
                         } else {
                             words.push(word);
                         }
                     }
+                    if has_else {
+                        loop {
+                            let word = su(self.temp_inst_buf.pop())?;
+                            if word == "then" {
+                                break;
+                            }
+                        }
+                    }
                     words.reverse();
-                    do_word(words, state, out_buf, in_buf)?;
-                    words.append(&mut state.temp_inst_buf);
+                    self.do_word(words, out_buf, in_buf)?;
+                    words.append(&mut self.temp_inst_buf);
+                } else {
+                    loop {
+                        let word = su(self.temp_inst_buf.pop())?;
+                        if word == "then" {
+                            has_else = false;
+                            break;
+                        } else if word == "else" {
+                            has_else = true;
+                            break;
+                        }
+                    }
+                    if has_else {
+                        loop {
+                            let word = su(self.temp_inst_buf.pop())?;
+                            if word == "then" {
+                                break;
+                            } else {
+                                words.push(word);
+                            }
+                        }
+                        words.reverse();
+                        self.do_word(words, out_buf, in_buf)?;
+                        words.append(&mut self.temp_inst_buf);
+                    }
                 }
             }
+            _ => match word.as_str().parse::<i64>() {
+                Ok(num) => self.stack.push(num),
+                Err(_) => {
+                    let mut instructions = self
+                        .dict
+                        .get(&word)
+                        .ok_or(ExecutionError::NoSuchWord(word))?
+                        .clone();
+                    instructions.reverse();
+                    self.do_word(&mut instructions, out_buf, in_buf)?;
+                }
+            },
         }
-        _ => match word.as_str().parse::<i64>() {
-            Ok(num) => state.stack.push(num),
-            Err(_) => {
-                let mut instructions = state
-                    .dict
-                    .get(&word)
-                    .ok_or(ExecutionError::NoSuchWord(word))?
-                    .clone();
-                instructions.reverse();
-                do_word(&mut instructions, state, out_buf, in_buf)?;
-            }
-        },
+        self.do_word(words, out_buf, in_buf)
     }
-    do_word(words, state, out_buf, in_buf)
 }
 
 fn do_op(stack: &mut Stack, op: fn(i64, i64) -> i64) -> ExecutionResult<()> {
@@ -216,4 +227,18 @@ fn do_op(stack: &mut Stack, op: fn(i64, i64) -> i64) -> ExecutionResult<()> {
 
 fn su<T>(val: Option<T>) -> ExecutionResult<T> {
     val.ok_or(ExecutionError::StackUnderflow)
+}
+
+pub fn tokenize<const N: usize>(code: &str) -> Words<N> {
+    code.split(|c| c == ' ' || c == '\n')
+        .filter_map(|s| {
+            let new = s.trim();
+            if new.is_empty() {
+                None
+            } else {
+                Some(new.into())
+            }
+        })
+        .rev()
+        .collect::<TinyVec<_>>()
 }

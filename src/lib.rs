@@ -1,13 +1,8 @@
-#![no_std]
-
-extern crate no_std_compat as std;
-
 use hashbrown::HashMap;
 use smartstring::{Compact, SmartString};
 use std::{
     fmt::{self, Display, Formatter},
     io::{Read, Write},
-    prelude::v1::*,
 };
 use tinyvec::{tiny_vec, TinyVec};
 

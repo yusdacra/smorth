@@ -1,13 +1,18 @@
+#![no_std]
+
+extern crate alloc;
+
+use alloc::vec::Vec;
+use core::fmt::{self, Display, Formatter};
+use core2::io::{Error as IoError, Read, Write};
 use hashbrown::HashMap;
 use smartstring::{Compact, SmartString};
-use std::{
-    fmt::{self, Display, Formatter},
-    io::{Read, Write},
-};
 use tinyvec::{tiny_vec, TinyVec};
 
 const STACK_SIZE: usize = 256;
+const READ_BUF_SIZE: usize = 256;
 
+type ReadBuf = TinyVec<[u8; READ_BUF_SIZE]>;
 type Words = Vec<Word>;
 type Stack = TinyVec<[i64; STACK_SIZE]>;
 pub type Word = SmartString<Compact>;
@@ -20,7 +25,7 @@ pub enum ExecutionError {
     Code(i32),
     StackUnderflow,
     NoSuchWord(Word),
-    IoError(std::io::Error),
+    IoError(IoError),
 }
 
 impl Display for ExecutionError {
@@ -34,8 +39,8 @@ impl Display for ExecutionError {
     }
 }
 
-impl From<std::io::Error> for ExecutionError {
-    fn from(err: std::io::Error) -> Self {
+impl From<IoError> for ExecutionError {
+    fn from(err: IoError) -> Self {
         ExecutionError::IoError(err)
     }
 }
@@ -46,7 +51,7 @@ type ExecutionResult<T> = Result<T, ExecutionError>;
 pub struct State {
     pub stack: Stack,
     pub dict: HashMap<Word, Words>,
-    read_buf: String,
+    read_buf: ReadBuf,
     temp_inst_buf: Words,
 }
 
@@ -55,7 +60,7 @@ impl Default for State {
         Self {
             stack: tiny_vec!([i64; STACK_SIZE]),
             dict: HashMap::with_capacity(16),
-            read_buf: String::with_capacity(128),
+            read_buf: tiny_vec!([u8; READ_BUF_SIZE]),
             temp_inst_buf: Vec::with_capacity(256),
         }
     }
@@ -77,15 +82,18 @@ impl State {
             "emit" => write!(
                 out_buf,
                 "{}",
-                std::char::from_u32(su(self.stack.pop())? as u32)
-                    .unwrap_or(std::char::REPLACEMENT_CHARACTER)
+                core::char::from_u32(su(self.stack.pop())? as u32)
+                    .unwrap_or(core::char::REPLACEMENT_CHARACTER)
             )?,
-            "read" => {
-                in_buf.read_to_string(&mut self.read_buf)?;
-                for c in self.read_buf.chars() {
-                    self.stack.push(c as i64);
+            "key" => {
+                let mut ch = [0; 1];
+                if let Err(err) = in_buf.read_exact(&mut ch) {
+                    match err.kind() {
+                        core2::io::ErrorKind::UnexpectedEof => {}
+                        _ => return Err(err.into()),
+                    }
                 }
-                self.read_buf.clear();
+                self.stack.push(ch[0] as i64);
             }
             "cr" => writeln!(out_buf)?,
             "+" => do_op(&mut self.stack, |f, s| s + f)?,

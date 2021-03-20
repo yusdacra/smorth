@@ -14,4 +14,4 @@ rustyline = { version = "8.0.0", default-features = false, optional = true }
 
 [[bin]]
 name = "smorth"
-required-features = ["rustyline"]
+required-features = ["rustyline", "core2/std"]

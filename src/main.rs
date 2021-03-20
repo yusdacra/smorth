@@ -9,7 +9,7 @@ use std::{
 const HIST_FILE: &str = "/tmp/.smorth_history";
 
 fn main() {
-    let mut state = State::<128>::default();
+    let mut state = State::default();
     match env::args().nth(1) {
         Some(path) => {
             let code = fs::read_to_string(path).expect("couldnt read file");

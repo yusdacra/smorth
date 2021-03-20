@@ -8,7 +8,7 @@ use tinyvec::{tiny_vec, TinyVec};
 
 const STACK_SIZE: usize = 256;
 
-type Words<const N: usize> = TinyVec<[Word; N]>;
+type Words = Vec<Word>;
 type Stack = TinyVec<[i64; STACK_SIZE]>;
 pub type Word = SmartString<Compact>;
 
@@ -43,28 +43,28 @@ impl From<std::io::Error> for ExecutionError {
 type ExecutionResult<T> = Result<T, ExecutionError>;
 
 #[derive(Debug, Clone)]
-pub struct State<const N: usize> {
+pub struct State {
     pub stack: Stack,
-    pub dict: HashMap<Word, Words<N>>,
+    pub dict: HashMap<Word, Words>,
     read_buf: String,
-    temp_inst_buf: Words<N>,
+    temp_inst_buf: Words,
 }
 
-impl<const N: usize> Default for State<N> {
+impl Default for State {
     fn default() -> Self {
         Self {
             stack: tiny_vec!([i64; STACK_SIZE]),
             dict: HashMap::with_capacity(16),
             read_buf: String::with_capacity(128),
-            temp_inst_buf: tiny_vec!([Word; N]),
+            temp_inst_buf: Vec::with_capacity(256),
         }
     }
 }
 
-impl<const N: usize> State<N> {
+impl State {
     pub fn do_word<R: Read, W: Write>(
         &mut self,
-        words: &mut Words<N>,
+        words: &mut Words,
         out_buf: &mut W,
         in_buf: &mut R,
     ) -> ExecutionResult<()> {
@@ -122,8 +122,7 @@ impl<const N: usize> State<N> {
             "exit" => return Err(ExecutionError::Code(su(self.stack.pop())? as i32)),
             ":" => {
                 let def_word = su(words.pop())?;
-                self.dict
-                    .insert(def_word.clone(), tinyvec::tiny_vec!([Word; N]));
+                self.dict.insert(def_word.clone(), Vec::with_capacity(256));
                 loop {
                     let word = su(words.pop())?;
                     if word == ";" {
@@ -224,7 +223,7 @@ fn su<T>(val: Option<T>) -> ExecutionResult<T> {
     val.ok_or(ExecutionError::StackUnderflow)
 }
 
-pub fn tokenize<const N: usize>(code: &str) -> Words<N> {
+pub fn tokenize(code: &str) -> Words {
     code.split(|c| c == ' ' || c == '\n')
         .filter_map(|s| {
             let new = s.trim();
@@ -235,5 +234,5 @@ pub fn tokenize<const N: usize>(code: &str) -> Words<N> {
             }
         })
         .rev()
-        .collect::<TinyVec<_>>()
+        .collect()
 }

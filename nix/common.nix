@@ -1,7 +1,7 @@
 { sources, system }:
 let
   pkgz = import sources.nixpkgs { inherit system; overlays = [ sources.rustOverlay.overlay ]; };
-  rust = pkgz.rust-bin.nightly.latest.rust.override {
+  rust = pkgz.rust-bin.stable.latest.rust.override {
     extensions = [ "rust-src" ];
   };
 

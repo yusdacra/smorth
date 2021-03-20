@@ -6,11 +6,8 @@ edition = "2018"
 license = "MIT"
 
 [dependencies]
-tinyvec = { version = "1.1.1", features = [
-    "alloc",
-    "nightly_const_generics",
-    "nightly_slice_partition_dedup",
-] }
+core2 = { git = "https://github.com/bbqsrc/core2.git", default-features = false, features = ["alloc"] }
+tinyvec = { version = "1.1.1", features = ["alloc"] }
 smartstring = { version = "0.2.6" }
 hashbrown = { version = "0.11.0", default-features = false, features = ["ahash", "inline-more"] }
 rustyline = { version = "8.0.0", default-features = false, optional = true }
